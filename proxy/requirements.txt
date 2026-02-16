@@ -1,0 +1,16 @@
+# PrinterMonitor Pro - Proxy Requirements
+
+# SNMP library for printer communication
+pysnmp==6.2.6
+
+# HTTP client for cloud API communication
+requests==2.31.0
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# Async support
+asyncio==3.4.3
+
+# Scheduling for periodic monitoring
+APScheduler==3.10.4
