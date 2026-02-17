@@ -25,16 +25,6 @@ class CloudStorage(StorageBackend):
         retry_delay: int = 5,
         enable_buffer: bool = True
     ):
-        """
-        Initialize cloud storage
-        
-        Args:
-            api_url: Base URL of cloud API (e.g., https://api.printermonitor.pro)
-            api_key: API key for authentication
-            retry_attempts: Number of retry attempts for failed requests
-            retry_delay: Delay between retries in seconds
-            enable_buffer: Enable local SQLite buffering when cloud unavailable
-        """
         self.api_url = api_url.rstrip('/')
         self.api_key = api_key
         self.retry_attempts = retry_attempts
@@ -44,10 +34,10 @@ class CloudStorage(StorageBackend):
         # Initialize local buffer if enabled
         self.buffer = LocalStorage() if enable_buffer else None
         
-        # HTTP session with auth header
+        # HTTP session with API key header
         self.session = requests.Session()
         self.session.headers.update({
-            'Authorization': f'Bearer {api_key}',
+            'X-API-Key': api_key,
             'Content-Type': 'application/json',
             'User-Agent': 'PrinterMonitorPro-Proxy/1.0'
         })
@@ -63,18 +53,7 @@ class CloudStorage(StorageBackend):
         data: Dict = None,
         params: Dict = None
     ) -> Optional[Dict]:
-        """
-        Make HTTP request to cloud API with retry logic
-        
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            endpoint: API endpoint (e.g., '/api/v1/metrics')
-            data: Request body (for POST/PUT)
-            params: Query parameters
-        
-        Returns:
-            Response JSON or None if failed
-        """
+        """Make HTTP request with retry logic"""
         url = f"{self.api_url}{endpoint}"
         
         for attempt in range(self.retry_attempts):
@@ -88,7 +67,6 @@ class CloudStorage(StorageBackend):
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
                 
-                # Check response status
                 response.raise_for_status()
                 return response.json()
                 
@@ -104,7 +82,6 @@ class CloudStorage(StorageBackend):
     def save_metrics(self, printer_id: str, metrics: Dict[str, Any]) -> bool:
         """Save printer metrics to cloud API"""
         
-        # Prepare data for API
         data = {
             'printer_id': printer_id,
             'timestamp': datetime.now().isoformat(),
@@ -118,20 +95,16 @@ class CloudStorage(StorageBackend):
             }
         }
         
-        # Try to send to cloud
-        result = self._make_request('POST', '/api/v1/status', data=data)
+        result = self._make_request('POST', '/api/v1/metrics', data=data)
         
         if result:
             print(f"✓ Metrics sent to cloud for {printer_id}")
             return True
         else:
             print(f"✗ Failed to send metrics to cloud for {printer_id}")
-            
-            # Fall back to local buffer if enabled
             if self.buffer:
                 print(f"  → Saving to local buffer instead")
                 return self.buffer.save_metrics(printer_id, metrics)
-            
             return False
     
     def get_or_create_printer(
@@ -150,60 +123,40 @@ class CloudStorage(StorageBackend):
             'model': model
         }
         
-        # Try to register with cloud
         result = self._make_request('POST', '/api/v1/printers', data=data)
         
         if result:
             print(f"✓ Registered printer with cloud: {name} ({ip})")
-            
-            # Also register in local buffer if enabled
             if self.buffer:
                 self.buffer.get_or_create_printer(ip, name, location, model)
-            
             return ip
         else:
             print(f"✗ Failed to register printer with cloud: {name} ({ip})")
-            
-            # Fall back to local buffer if enabled
             if self.buffer:
                 print(f"  → Registering in local buffer instead")
                 return self.buffer.get_or_create_printer(ip, name, location, model)
-            
             return None
     
     def get_printers(self) -> List[Dict[str, Any]]:
-        """Get list of printers from cloud API"""
-        
-        result = self._make_request('GET', '/api/v1/printers')
-        
-        if result and 'printers' in result:
-            return result['printers']
-        else:
-            print("✗ Failed to get printers from cloud")
-            
-            # Fall back to local buffer if enabled
-            if self.buffer:
-                print("  → Using local buffer instead")
-                return self.buffer.get_printers()
-            
-            return []
+        """
+        Get printers from local buffer only.
+        In cloud mode the proxy monitors whatever is in its local config.
+        """
+        if self.buffer:
+            return self.buffer.get_printers()
+        return []
     
     def get_printer_by_ip(self, ip: str) -> Optional[Dict[str, Any]]:
-        """Get printer from cloud API by IP"""
-        
-        result = self._make_request('GET', f'/api/v1/printers/{ip}')
-        
-        if result:
-            return result
-        else:
-            # Fall back to local buffer if enabled
-            if self.buffer:
-                return self.buffer.get_printer_by_ip(ip)
-            
-            return None
+        """Get printer by IP from local buffer"""
+        if self.buffer:
+            return self.buffer.get_printer_by_ip(ip)
+        return None
     
     def health_check(self) -> bool:
         """Check if cloud API is available"""
-        
-        result = self._make_request('GET', '/health')
-        return result is not None
+        try:
+            response = self.session.get(f"{self.api_url}/health", timeout=5)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"✗ Cloud health check failed: {e}")
+            return False

@@ -6,10 +6,10 @@ FastAPI application entry point
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import init_db
+from .routes import auth, devices, printers, metrics
 
 # Create FastAPI app
 app = FastAPI(
@@ -72,8 +72,27 @@ async def root():
     }
 
 
-# Include routers (we'll add these later)
-# from .routes import auth, devices, metrics
-# app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["auth"])
-# app.include_router(devices.router, prefix=f"{settings.API_V1_PREFIX}/devices", tags=["devices"])
-# app.include_router(metrics.router, prefix=f"{settings.API_V1_PREFIX}/metrics", tags=["metrics"])
+# Include all routers
+app.include_router(
+    auth.router,
+    prefix=f"{settings.API_V1_PREFIX}/auth",
+    tags=["Authentication"]
+)
+
+app.include_router(
+    devices.router,
+    prefix=f"{settings.API_V1_PREFIX}/devices",
+    tags=["Devices"]
+)
+
+app.include_router(
+    printers.router,
+    prefix=f"{settings.API_V1_PREFIX}/printers",
+    tags=["Printers"]
+)
+
+app.include_router(
+    metrics.router,
+    prefix=f"{settings.API_V1_PREFIX}/metrics",
+    tags=["Metrics"]
+)
