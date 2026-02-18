@@ -13,6 +13,7 @@ from ..database import get_db
 from ..models import User, ProxyDevice
 from ..schemas import DeviceCreate, DeviceResponse, DeviceRegistrationResponse
 from ..auth.dependencies import get_current_user
+from ..utils.license_service import LicenseService
 
 router = APIRouter()
 
@@ -26,8 +27,21 @@ def register_device(
 ):
     """
     Register a new proxy device
-    Returns the device API key (only shown once!)
+    
+    Enforces device limit based on user's license tier
     """
+    # Check device limit
+    can_add, current_count, max_allowed = LicenseService.check_device_limit(db, current_user)
+    
+    if not can_add:
+        # Get effective tier for better error message
+        tier_id = LicenseService.get_effective_tier(current_user.license)
+        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Device limit reached. Your {tier_id} plan allows {max_allowed} device(s). You have {current_count}. Please upgrade to add more devices."
+        )
+    
     # Check if device with same hardware_id already exists
     if device_data.hardware_id:
         existing = db.query(ProxyDevice).filter(
@@ -58,6 +72,7 @@ def register_device(
     db.refresh(device)
     
     print(f"✓ Device registered: {device.name} for user {current_user.email}")
+    print(f"  → Device count: {current_count + 1}/{max_allowed}")
     
     return device
 

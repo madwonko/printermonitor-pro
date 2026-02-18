@@ -13,6 +13,7 @@ from ..database import get_db
 from ..models import User, ProxyDevice, Printer
 from ..schemas import PrinterCreate, PrinterUpdate, PrinterResponse
 from ..auth.dependencies import get_current_user, get_current_device
+from ..utils.license_service import LicenseService
 
 router = APIRouter()
 
@@ -25,23 +26,41 @@ def register_printer(
 ):
     """
     Register a printer (called by proxy device)
-    Requires device API key authentication
+    
+    Enforces printer limit based on user's license tier
     """
-    # Check if printer already registered for this device
+    # Get the user (device owner)
+    user = db.query(User).filter(User.id == current_device.user_id).first()
+    
+    # Check if printer already exists for this device
     existing = db.query(Printer).filter(
         Printer.ip == printer_data.ip,
         Printer.device_id == current_device.id
     ).first()
     
     if existing:
-        # Update existing printer info
+        # Update existing printer info (doesn't count against limit)
         existing.name = printer_data.name
         existing.location = printer_data.location
         existing.model = printer_data.model
         existing.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(existing)
+        
+        print(f"✓ Updated existing printer: {existing.name} ({existing.ip})")
+        
         return existing
+    
+    # Check printer limit before creating new printer
+    can_add, current_count, max_allowed = LicenseService.check_printer_limit(db, user)
+    
+    if not can_add:
+        tier_id = LicenseService.get_effective_tier(user.license)
+        
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Printer limit reached. Your {tier_id} plan allows {max_allowed} printer(s). You have {current_count}. Please upgrade to add more printers."
+        )
     
     # Create new printer
     printer = Printer(
@@ -60,6 +79,7 @@ def register_printer(
     db.refresh(printer)
     
     print(f"✓ Printer registered: {printer.name} ({printer.ip})")
+    print(f"  → Printer count: {current_count + 1}/{max_allowed if max_allowed != -1 else '∞'}")
     
     return printer
 
@@ -69,10 +89,7 @@ def list_printers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    List all printers for current user
-    Requires JWT authentication
-    """
+    """List all printers for current user"""
     printers = db.query(Printer).filter(
         Printer.user_id == current_user.id
     ).all()
@@ -86,9 +103,7 @@ def get_printer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Get a specific printer by ID
-    """
+    """Get a specific printer by ID"""
     printer = db.query(Printer).filter(
         Printer.id == printer_id,
         Printer.user_id == current_user.id
@@ -110,9 +125,7 @@ def update_printer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Update a printer
-    """
+    """Update a printer"""
     printer = db.query(Printer).filter(
         Printer.id == printer_id,
         Printer.user_id == current_user.id
@@ -146,9 +159,7 @@ def delete_printer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Delete a printer and all its metrics
-    """
+    """Delete a printer and all its metrics"""
     printer = db.query(Printer).filter(
         Printer.id == printer_id,
         Printer.user_id == current_user.id

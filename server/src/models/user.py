@@ -29,6 +29,7 @@ class User(Base):
     # Relationships
     devices = relationship("ProxyDevice", back_populates="owner", cascade="all, delete-orphan")
     printers = relationship("Printer", back_populates="owner", cascade="all, delete-orphan")
+    license = relationship("License", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User {self.email}>"

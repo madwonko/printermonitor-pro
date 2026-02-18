@@ -14,6 +14,7 @@ from ..schemas import UserCreate, UserResponse, Token, LoginRequest
 from ..auth import hash_password, verify_password, create_access_token
 from ..auth.dependencies import get_current_user
 from ..config import settings
+from ..utils.license_service import LicenseService
 
 router = APIRouter()
 
@@ -22,6 +23,7 @@ router = APIRouter()
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """
     Register a new user account
+    Automatically assigns Free tier with 14-day Pro trial
     """
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -44,7 +46,12 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     
+    # Auto-assign Free license with Pro trial
+    license = LicenseService.create_free_license(db, user)
+    
     print(f"✓ New user registered: {user.email}")
+    print(f"  → Assigned Free license with 14-day Pro trial")
+    print(f"  → Trial ends: {license.trial_ends_at}")
     
     return user
 
@@ -102,7 +109,5 @@ def get_me(current_user: User = Depends(get_current_user)):
 def logout(current_user: User = Depends(get_current_user)):
     """
     Logout current user
-    (JWT tokens are stateless, so we just return success)
-    (In Phase 3 we'll add token blacklisting)
     """
     return {"message": "Successfully logged out"}
