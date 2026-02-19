@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     METRICS_RETENTION_DAYS: int = 365
     METRICS_COMPRESS_AFTER_DAYS: int = 7
     
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    
+    # Stripe Price IDs
+    STRIPE_PRICE_MAKER_MONTHLY: str = ""
+    STRIPE_PRICE_MAKER_YEARLY: str = ""
+    STRIPE_PRICE_PRO_MONTHLY: str = ""
+    STRIPE_PRICE_PRO_YEARLY: str = ""
+    STRIPE_PRICE_ENTERPRISE_MONTHLY: str = ""
+    STRIPE_PRICE_ENTERPRISE_YEARLY: str = ""
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
