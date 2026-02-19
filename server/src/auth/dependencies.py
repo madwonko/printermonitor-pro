@@ -23,11 +23,6 @@ def get_current_user(
 ) -> User:
     """
     Dependency to get current authenticated user from JWT token
-    
-    Usage:
-        @app.get("/endpoint")
-        def endpoint(current_user: User = Depends(get_current_user)):
-            ...
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -59,17 +54,32 @@ def get_current_user(
     return user
 
 
+def get_current_admin(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Dependency to ensure current user is an admin
+    
+    Usage:
+        @app.get("/admin/users")
+        def list_users(admin: User = Depends(get_current_admin)):
+            ...
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    return current_user
+
+
 def get_current_device(
     api_key: str = Security(api_key_header),
     db: Session = Depends(get_db)
 ) -> ProxyDevice:
     """
     Dependency to get current proxy device from API key
-    
-    Usage:
-        @app.post("/metrics")
-        def ingest_metrics(device: ProxyDevice = Depends(get_current_device)):
-            ...
     """
     if not api_key:
         raise HTTPException(

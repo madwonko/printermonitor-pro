@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import init_db
-from .routes import auth, devices, printers, metrics, billing
+from .routes import auth, devices, printers, metrics, billing, admin
 
 # Create FastAPI app
 app = FastAPI(
@@ -101,4 +101,10 @@ app.include_router(
     billing.router,
     prefix=f"{settings.API_V1_PREFIX}/billing",
     tags=["Billing"]
+)
+
+app.include_router(
+    admin.router,
+    prefix=f"{settings.API_V1_PREFIX}/admin",
+    tags=["Admin"]
 )
