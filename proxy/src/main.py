@@ -1,172 +1,161 @@
 """
 PrinterMonitor Pro - Proxy Main Entry Point
-
-This is the main script that runs on the local network device (Raspberry Pi, Linux server, etc.)
-to monitor printers and send data to the configured storage backend (local or cloud).
 """
 
 import sys
-import asyncio
 import time
 from datetime import datetime
-
 from config.settings import Config
 from storage import get_storage
 from monitoring.collector import monitor_multiple_printers
+from discovery.subnet_scanner import scan_and_filter_printers
+
+config = Config()
+
+
+def print_banner():
+    """Print startup banner"""
+    print("=" * 80)
+    print("PRINTERMONITOR PRO - PROXY DEVICE")
+    print("=" * 80)
+    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
+
+
+def scan_remote_subnets_if_needed(storage):
+    """
+    Check for configured remote subnets and scan them for new printers
+    """
+    if config.MONITOR_MODE != "cloud":
+        return  # Only works in cloud mode
+    
+    try:
+        # Get configured subnets from cloud
+        response = storage.session.get(
+            f"{storage.api_url}/remote-subnets",
+            headers=storage.headers
+        )
+        
+        if response.status_code != 200:
+            return
+        
+        subnets = response.json()
+        enabled_subnets = [s for s in subnets if s.get('enabled', True)]
+        
+        if not enabled_subnets:
+            return
+        
+        print("\n" + "=" * 80)
+        print("SCANNING REMOTE SUBNETS")
+        print("=" * 80)
+        
+        for subnet_config in enabled_subnets:
+            subnet = subnet_config['subnet']
+            description = subnet_config.get('description', 'No description')
+            
+            print(f"\nSubnet: {subnet}")
+            print(f"Description: {description}")
+            
+            # Scan for printers
+            printer_ips = scan_and_filter_printers(subnet)
+            
+            # Register any new printers
+            for ip in printer_ips:
+                try:
+                    # Check if printer already exists
+                    existing = storage.session.get(
+                        f"{storage.api_url}/printers",
+                        headers=storage.headers
+                    ).json()
+                    
+                    if any(p['ip'] == ip for p in existing):
+                        print(f"  → {ip} already registered")
+                        continue
+                    
+                    # Register new printer
+                    response = storage.session.post(
+                        f"{storage.api_url}/printers",
+                        headers=storage.headers,
+                        json={
+                            "ip": ip,
+                            "name": f"Printer at {ip}",
+                            "location": f"Subnet {subnet}",
+                            "model": "Auto-discovered"
+                        }
+                    )
+                    
+                    if response.status_code == 201:
+                        print(f"  ✓ Registered new printer: {ip}")
+                    else:
+                        print(f"  ✗ Failed to register {ip}: {response.text}")
+                        
+                except Exception as e:
+                    print(f"  ✗ Error registering {ip}: {e}")
+        
+        print("=" * 80)
+        
+    except Exception as e:
+        print(f"Error scanning remote subnets: {e}")
 
 
 def main():
     """Main entry point"""
+    print_banner()
     
-    print("="*80)
-    print("PRINTERMONITOR PRO - PROXY DEVICE")
-    print("="*80)
-    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+    storage = get_storage()
     
-    # Display configuration
-    Config.display()
-    print()
+    # Get command
+    command = sys.argv[1] if len(sys.argv) > 1 else "once"
     
-    # Validate configuration
-    try:
-        Config.validate()
-    except ValueError as e:
-        print(f"✗ Configuration error: {e}")
-        print("\nPlease check your .env file or environment variables")
-        return 1
-    
-    # Get storage backend
-    try:
-        storage = get_storage()
-    except Exception as e:
-        print(f"✗ Failed to initialize storage: {e}")
-        return 1
-    
-    # Health check
-    print("\nPerforming health check...")
-    if not storage.health_check():
-        print("✗ Storage backend is not healthy!")
-        return 1
-    print("✓ Storage backend is healthy")
-    
-    # Get list of printers
-    print("\nGetting list of printers...")
-    printers = storage.get_printers()
-    
-    if not printers:
-        print("\n⚠ No printers found in storage!")
-        print("\nTo add printers:")
-        print("  1. Run printer discovery: python -m discovery.scanner")
-        print("  2. Or manually register printers in the database/cloud")
-        return 0
-    
-    print(f"✓ Found {len(printers)} printer(s) to monitor")
-    
-    # Check command line arguments
-    if len(sys.argv) > 1:
-        command = sys.argv[1].lower()
+    if command == "once":
+        # Run once: scan subnets + monitor printers
+        scan_remote_subnets_if_needed(storage)
+        printers = storage.get_printers()
         
-        if command == "once":
-            # Single monitoring run
-            print("\n" + "="*80)
-            print("STARTING MONITORING CYCLE")
-            print("="*80)
-            
-            run_monitoring_cycle(storage, printers)
-            
-        elif command == "loop":
-            # Continuous monitoring
-            interval = Config.MONITOR_INTERVAL
-            if len(sys.argv) > 2:
-                try:
-                    interval = int(sys.argv[2])
-                except ValueError:
-                    print(f"Invalid interval: {sys.argv[2]}")
-                    return 1
-            
-            print(f"\n✓ Starting continuous monitoring (interval: {interval} seconds)")
-            print("Press Ctrl+C to stop\n")
-            
-            try:
-                while True:
-                    print("="*80)
-                    print(f"MONITORING CYCLE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    print("="*80)
-                    
-                    run_monitoring_cycle(storage, printers)
-                    
-                    print(f"\nSleeping for {interval} seconds...")
-                    print("="*80)
-                    print()
-                    time.sleep(interval)
-                    
-            except KeyboardInterrupt:
-                print("\n\n✓ Monitoring stopped by user")
-                return 0
-        
+        if printers:
+            print(f"\n✓ Monitoring {len(printers)} printer(s)")
+            monitor_multiple_printers(printers, storage)
         else:
-            print(f"Unknown command: {command}")
-            print_usage()
-            return 1
-    else:
-        # Default: single run
-        print("\n" + "="*80)
-        print("STARTING MONITORING CYCLE")
-        print("="*80)
+            print("\n⏸  No printers to monitor")
+            
+    elif command == "loop":
+        # Continuous loop
+        print("\nStarting continuous monitoring...")
+        print(f"Check interval: {config.MONITOR_INTERVAL} seconds")
+        print("Press Ctrl+C to stop\n")
         
-        run_monitoring_cycle(storage, printers)
-    
-    return 0
-
-
-def run_monitoring_cycle(storage, printers):
-    """Run a single monitoring cycle"""
-    
-    # Monitor all printers
-    results = asyncio.run(monitor_multiple_printers(printers, storage))
-    
-    # Print summary
-    successful = sum(1 for success in results.values() if success)
-    failed = len(results) - successful
-    
-    print("\n" + "="*80)
-    print("MONITORING CYCLE COMPLETE")
-    print("="*80)
-    print(f"Successful: {successful}/{len(results)}")
-    if failed > 0:
-        print(f"Failed: {failed}/{len(results)}")
-        print("\nFailed printers:")
-        for ip, success in results.items():
-            if not success:
-                print(f"  - {ip}")
-    print("="*80)
-
-
-def print_usage():
-    """Print usage instructions"""
-    print("""
-PrinterMonitor Pro Proxy - Usage:
-
-python src/main.py              Run single monitoring cycle
-python src/main.py once         Run single monitoring cycle (explicit)
-python src/main.py loop         Continuous monitoring (uses MONITOR_INTERVAL from config)
-python src/main.py loop 1800    Continuous monitoring with custom interval (30 minutes)
-
-Configuration:
-- Copy .env.example to .env and customize
-- Set MONITOR_MODE to 'local' or 'cloud'
-- Configure SNMP settings as needed
-
-Examples:
-    python src/main.py                    # Single run
-    python src/main.py loop               # Continuous with default interval
-    python src/main.py loop 900           # Continuous every 15 minutes
-    
-For discovery and setup:
-    python -m discovery.scanner       # Scan network for printers
-""")
+        cycle = 0
+        
+        try:
+            while True:
+                cycle += 1
+                print(f"\n{'=' * 80}")
+                print(f"CYCLE {cycle} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print("=" * 80)
+                
+                # Scan subnets every 10 cycles (or ~50 minutes with 5min interval)
+                if cycle % 10 == 1:
+                    scan_remote_subnets_if_needed(storage)
+                
+                # Monitor known printers
+                printers = storage.get_printers()
+                
+                if printers:
+                    print(f"Monitoring {len(printers)} printer(s)...")
+                    monitor_multiple_printers(printers, storage)
+                else:
+                    print("No printers registered yet")
+                
+                print(f"\nNext check in {config.MONITOR_INTERVAL} seconds...")
+                time.sleep(config.MONITOR_INTERVAL)
+                
+        except KeyboardInterrupt:
+            print("\n\nStopping monitoring...")
+            
+    else:
+        print("Usage: python main.py [once|loop]")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
