@@ -1,6 +1,6 @@
 #!/bin/bash
 # PrinterMonitor Pro - Proxy Device Installer
-# Usage: curl -fsSL https://install.prntr.org | sudo bash
+# Usage: curl -fsSL https://install.prntr.org | sudo bash -s YOUR_API_KEY
 
 set -e
 
@@ -12,9 +12,12 @@ echo ""
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then 
   echo "❌ Please run with sudo:"
-  echo "   curl -fsSL https://install.prntr.org | sudo bash"
+  echo "   curl -fsSL https://raw.githubusercontent.com/madwonko/printermonitor-pro/main/proxy/install.sh | sudo bash -s YOUR_API_KEY"
   exit 1
 fi
+
+# Get API key from argument or prompt
+API_KEY="$1"
 
 # Detect OS
 if [ -f /etc/os-release ]; then
@@ -69,26 +72,28 @@ pip install -r requirements.txt >/dev/null 2>&1
 echo "✓ Python environment ready"
 echo ""
 
-# Get API key from user
-echo "🔑 Configuration"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "1. Go to: https://app.prntr.org/dashboard/devices"
-echo "2. Click 'Add Device'"
-echo "3. Copy the API key shown"
-echo ""
-echo -n "Paste your API key here: "
-read -r API_KEY
+# Get API key if not provided as argument
+if [ -z "$API_KEY" ]; then
+    echo "🔑 Configuration"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "1. Go to: https://app.prntr.org/dashboard/devices"
+    echo "2. Click 'Add Device'"
+    echo "3. Copy the API key shown"
+    echo ""
+    read -p "Paste your API key here: " API_KEY
+fi
 
 if [ -z "$API_KEY" ]; then
     echo "❌ No API key provided. Installation cancelled."
     exit 1
 fi
 
-# Ask for SNMP community string
+echo "✓ API key configured"
 echo ""
-echo -n "SNMP community string (default: public): "
-read -r SNMP_COMMUNITY
+
+# Ask for SNMP community string
+read -p "SNMP community string (default: public): " SNMP_COMMUNITY
 SNMP_COMMUNITY=${SNMP_COMMUNITY:-public}
 
 # Create .env file
